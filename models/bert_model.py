@@ -223,31 +223,47 @@ class I2SRMREModel(nn.Module):
             result.append(temp_dict)
         return result
 
-class HMNeTNERModel(nn.Module):
+class I2SRMNERModel(nn.Module):
     def __init__(self, label_list, args):
-        super(HMNeTNERModel, self).__init__()
+        super(I2SRMNERModel, self).__init__()
         self.args = args
         self.prompt_dim = args.prompt_dim
         self.prompt_len = args.prompt_len
-        self.bert = BertModel.from_pretrained(args.bert_name)
-        self.bert_config = self.bert.config
-
+        self.roberta = AutoModel.from_pretrained("roberta-large", config=config)
+        self.roberta_config = self.roberta.config
         if args.use_prompt:
-            self.image_model = ImageModel()  # bsz, 6, 56, 56
+            self.image_model = ImageModel()
             self.encoder_conv =  nn.Sequential(
                             nn.Linear(in_features=3840, out_features=800),
                             nn.Tanh(),
-                            nn.Linear(in_features=800, out_features=4*2*768)
+                            nn.Linear(in_features=800, out_features=4*2*1024)
                             )
-            self.gates = nn.ModuleList([nn.Linear(4*768*2, 4) for i in range(12)])
+            self.gates = nn.ModuleList([nn.Linear(4*1024*2, 4) for i in range(24)])
 
         self.num_labels  = len(label_list)  # pad
-        print(self.num_labels)
-        self.crf = CRF(self.num_labels, batch_first=True)
-        self.fc = nn.Linear(self.bert.config.hidden_size, self.num_labels)
+        # print('self.num_labels是', self.num_labels) # 13
+        self.crf = CRF(self.num_labels) # self.crf = CRF(self.num_labels, batch_first=True)
+        # self.fc = nn.Linear(self.roberta.config.hidden_size, self.num_labels)
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None, images=None, aux_imgs=None):
+        batchformerhidden = 150
+        # self.encoder_layers = torch.nn.TransformerEncoderLayer(batchformerhidden * 80, 4, batchformerhidden * 80, 0.3)  # twitter15的长度是80。 dropout原来默认0.1, cvpr里是0.5。
+        self.encoder_layers = torch.nn.TransformerEncoderLayer(batchformerhidden * 128, 2, batchformerhidden * 128, 0.1)  # twitter17的长度是128。dropout原来默认0.1, cvpr里是0.5。
+        print('使用batchformer, head=4, dropout=0.3。batchformer中隐藏层维度是', batchformerhidden)
+        self.fc = nn.Linear(self.roberta.config.hidden_size, batchformerhidden)
+        self.linear = nn.Linear(batchformerhidden, self.num_labels)
+
+        # KLD 损失
+        self.linear_kl = nn.Linear(1000, self.roberta.config.hidden_size)  # 为图片特征加入这个线性层。
+        self.kl_loss = nn.KLDivLoss(reduction="batchmean")
+        self.kldlambda = 1.0
+        print('KLD损失前面的系数是', self.kldlambda)
+
+    def forward(self, input_ids=None, attention_mask=None, labels=None, images=None, aux_imgs=None, mode=None):
+        # print('input_ids: ', input_ids.size(), input_ids) # input_ids:  torch.Size([8, 80]) tensor([[  101,  2193,  2028,  ..., 2575, 102,     0,
+        # print('labels: ', labels.size(), labels) # labels:  torch.Size([8, 80]) tensor([[11,  1,  1,  1,  1,  8,  1,  1, 10, 10, 10,  1,  1,  1,  1,  1, 10, 10, ..., 10, 10, 12,  0,  0,  0,
+        # print('mode: ', mode) # mode:  "train"
+
         if self.args.use_prompt:
             prompt_guids = self.get_visual_prompt(images, aux_imgs)
             prompt_guids_length = prompt_guids[0][0].shape[2]
@@ -260,23 +276,99 @@ class HMNeTNERModel(nn.Module):
             prompt_attention_mask = attention_mask
             prompt_guids = None
 
-        bert_output = self.bert(input_ids=input_ids,
+        bert_output = self.roberta(input_ids=input_ids,
                             attention_mask=prompt_attention_mask,
-                            token_type_ids=token_type_ids,
                             past_key_values=prompt_guids,
                             return_dict=True)
         sequence_output = bert_output['last_hidden_state']  # bsz, len, hidden
-        sequence_output = self.dropout(sequence_output)  # bsz, len, hidden
-        emissions = self.fc(sequence_output)    # bsz, len, labels
-        
-        logits = self.crf.decode(emissions, attention_mask.byte())
+        sequence_output = self.dropout(sequence_output)  # bsz, len, hidden # sequence_output:  torch.Size([8, 80, 1024])
+
+        # kl 正则。
+        img_reg = self.image_model.resnet_output(images)  # resnet50的输出： img_reg:  torch.Size([8, 1000])
+        img_reg = self.linear_kl(img_reg)
+        modal1_pic = F.log_softmax(img_reg)
+        modal2_lan = F.softmax(sequence_output[:, 0, :])
+        kl_loss = self.kl_loss(modal1_pic, modal2_lan) # kl_loss:  tensor(0.6235, device='cuda:0', grad_fn=<DivBackward0>)
+
+        # 20220831 使用过batchformer.
+        emissions = self.fc(sequence_output)  # bsz, len, labels
+        # print('sequence_output: ', sequence_output.size(), 'emissions: ', emissions.size()) # sequence_output:  torch.Size([8, 80, 1024]) emissions:  torch.Size([8, 80, 150])
+
+        # if mode=="train":
+        # print('emissions in mode train: ', emissions.size()) # twitter15的长度是80. emissions in mode train:  torch.Size([8, 80, 150])。twitter17的长度是128emissions:  torch.Size([8, 128, 150])
+        emissions, labels, attention_mask = self.batchformer(emissions, labels, attention_mask, mode=mode)
+
+        # 增加ICLR2018 mixup方法。
+        emissions, labels, attention_mask = self.mixup_data(emissions, labels, attention_mask, mode=mode)
+
+        emissions = self.linear(emissions)
+        # print('emissions: ', emissions.size()) # emissions:  torch.Size([32, 80, 13])
+
+        logits = self.crf.viterbi_decode(emissions, attention_mask.byte()) # logits = self.crf.decode(emissions, attention_mask.byte())
         loss = None
         if labels is not None:
-            loss = -1 * self.crf(emissions, labels, mask=attention_mask.byte(), reduction='mean') 
+            loss = -1 * torch.mean(self.crf(emissions, labels, mask=attention_mask.byte()))  # loss = -1 * self.crf(emissions, labels, mask=attention_mask.byte(), reduction='mean')
+            # print('loss是', type(loss), loss.size(), loss) # loss是 <class 'torch.Tensor'> torch.Size([8]) tensor([107.7501, 115.2792,  92.3825,  88.1822,  88.6666, 125.3268,  59.3856, 143.7558], device='cuda:0', grad_fn=<MulBackward0>)
+            loss += self.kldlambda * kl_loss # 加上KLD。
+            # sys.exit(0)
         return TokenClassifierOutput(
             loss=loss,
             logits=logits
         )
+
+    def batchformer(self, sequence_output, labels, attention_mask, mode):  # mode in "train" "dev"。改变输入和标签。
+        # sequence_output:  torch.Size([8, 80, 768]), batchsize=8.
+        # labels:  torch.Size([8, 80])
+        old_feat = sequence_output
+        # print('mode:', mode) # mode: train
+        if mode == 'train':
+            entity_hidden_state = sequence_output.view(sequence_output.size()[0], -1).unsqueeze(1)
+            # print('entity_hidden_state: ', entity_hidden_state.size()) # twitter17是entity_hidden_state:  torch.Size([8, 1, 19200]) 128*150
+            entity_hidden_state = self.encoder_layers(entity_hidden_state)
+            entity_hidden_state = entity_hidden_state.squeeze(1).view(old_feat.size()[0], old_feat.size()[1], -1)
+            sequence_output = torch.cat([old_feat, entity_hidden_state], dim=0)
+            labels = torch.cat([labels, labels], dim=0)
+            attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
+            # print('sequence_output用batchformer: ', sequence_output.size()) # sequence_output用batchformer:  torch.Size([16, 80, 200]), batchsize是原来的2倍。
+            # print('labels用batchformer: ', labels.size()) # labels用batchformer: torch.Size([16, 80])
+        return sequence_output, labels, attention_mask
+
+    def mixup_data(self, x, y, attention_mask, mode, alpha=1.0, use_cuda=True):
+        '''Returns mixed inputs, pairs of targets, and lambda'''
+        # print('x: ', x.size()) # x:  torch.Size([16, 80, 150])
+        # print('y: ', y.size(), y) # y:  torch.Size([16, 80]) tensor([[11,  1,  1,  ...,  0,  0,  0], ..., [11,  8,  2,  ...,  0,  0,  0], [11,  8, 10,  ...,  0,  0,  0]], device='cuda:0')。
+        # print('attention_mask1: ', attention_mask.size(), attention_mask) # twitter15数据集是  attention_mask1:  torch.Size([16, 80]) tensor([[1, 1, 1,  ..., 0, 0, 0],
+        # twitter17数据集是 attention_mask1:  torch.Size([16, 128]) tensor([[1, 1, 1,  ..., 0, 0, 0], ..., [1, 1, 1,  ..., 0, 0, 0]], device='cuda:0')
+
+        if mode == 'train':
+            attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
+            # print('attention_mask2: ', attention_mask.size(), attention_mask) # attention_mask2:  torch.Size([32, 80]) tensor([[1, 1, 1,  ..., 0, 0, 0],
+            # sys.exit(0)
+            if alpha > 0:
+                lam = np.random.beta(alpha, alpha)
+            else:
+                lam = 1
+
+            batch_size = x.size()[0]
+            if use_cuda:
+                index = torch.randperm(batch_size).cuda()
+            else:
+                index = torch.randperm(batch_size)
+
+            mixed_x = lam * x + (1 - lam) * x[index, :]
+
+            # 重新组合
+            origx_and_mixedx = torch.cat((x, mixed_x), dim=0)
+            mixed_y = lam * y + (1 - lam) * y[index, :]
+            origy_and_mixedroundy = torch.cat((y, torch.round(mixed_y)), dim=0).long() # 注意这里 torch.round(torch.tensor(0.50))是0，而torch.round(torch.tensor(1.50))是2。
+
+            # print('origx_and_mixedx: ', origx_and_mixedx.size()) # origx_and_mixedx:  torch.Size([32, 80, 150])
+            # print('origy_and_mixedroundy: ', origy_and_mixedroundy.size(), y) # origy_and_mixedroundy:  torch.Size([32, 80]) tensor([[11,  1,  1,  ...,  0,  0,  0], ..., [11,  8, 10,  ...,  0,  0,  0]], device='cuda:0')
+            # for i in range(len(origy_and_mixedroundy)):
+            #     print(i, origy_and_mixedroundy[i])
+            # sys.exit(0)
+            return origx_and_mixedx, origy_and_mixedroundy, attention_mask
+        return x, y, attention_mask
 
     def get_visual_prompt(self, images, aux_imgs):
         bsz = images.size(0)
@@ -287,11 +379,11 @@ class HMNeTNERModel(nn.Module):
 
         prompt_guids = self.encoder_conv(prompt_guids)  # bsz, 4, 4*2*768
         aux_prompt_guids = [self.encoder_conv(aux_prompt_guid) for aux_prompt_guid in aux_prompt_guids] # 3 x [bsz, 4, 4*2*768]
-        split_prompt_guids = prompt_guids.split(768*2, dim=-1)   # 4 x [bsz, 4, 768*2]
-        split_aux_prompt_guids = [aux_prompt_guid.split(768*2, dim=-1) for aux_prompt_guid in aux_prompt_guids]   # 3x [4 x [bsz, 4, 768*2]]
+        split_prompt_guids = prompt_guids.split(1024*2, dim=-1)   # 4 x [bsz, 4, 768*2]
+        split_aux_prompt_guids = [aux_prompt_guid.split(1024*2, dim=-1) for aux_prompt_guid in aux_prompt_guids]   # 3x [4 x [bsz, 4, 768*2]]
 
         result = []
-        for idx in range(12):  # 12
+        for idx in range(24):  # 12
             sum_prompt_guids = torch.stack(split_prompt_guids).sum(0).view(bsz, -1) / 4     # bsz, 4, 768*2
             prompt_gate = F.softmax(F.leaky_relu(self.gates[idx](sum_prompt_guids)), dim=-1)
 
@@ -309,8 +401,8 @@ class HMNeTNERModel(nn.Module):
                 aux_key_vals.append(aux_key_val)
             key_val = [key_val] + aux_key_vals
             key_val = torch.cat(key_val, dim=1)
-            key_val = key_val.split(768, dim=-1)
-            key, value = key_val[0].reshape(bsz, 12, -1, 64).contiguous(), key_val[1].reshape(bsz, 12, -1, 64).contiguous()  # bsz, 12, 4, 64
+            key_val = key_val.split(1024, dim=-1)
+            key, value = key_val[0].reshape(bsz, 16, -1, 64).contiguous(), key_val[1].reshape(bsz, 16, -1, 64).contiguous()  # bsz, 12, 4, 64
             temp_dict = (key, value)
             result.append(temp_dict)
         return result
