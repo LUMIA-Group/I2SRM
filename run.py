@@ -9,7 +9,7 @@ import numpy as np
 import random
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from models.bert_model import HMNeTREModel, HMNeTNERModel
+from models.bert_model import I2SRMREModel, I2SRMNERModel
 from processor.dataset import MMREProcessor, MMPNERProcessor, MMREDataset, MMPNERDataset
 from modules.train import RETrainer, NERTrainer
 
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 MODEL_CLASSES = {
-    'MRE': HMNeTREModel,
-    'twitter15': HMNeTNERModel,
-    'twitter17': HMNeTNERModel
+    'MRE': I2SRMREModel,
+    'twitter15': I2SRMNERModel,
+    'twitter17': I2SRMNERModel
 }
 
 TRAINER_CLASSES = {
@@ -179,13 +179,13 @@ def main():
         re_dict = processor.get_relation_dict()
         num_labels = len(re_dict)
         tokenizer = processor.tokenizer
-        model = HMNeTREModel(num_labels, tokenizer, args=args)
+        model = I2SRMREModel(num_labels, tokenizer, args=args)
 
         trainer = Trainer(train_data=train_dataloader, dev_data=dev_dataloader, test_data=test_dataloader, model=model, processor=processor, args=args, logger=logger, writer=writer)
     else:   # NER task
         label_mapping = processor.get_label_mapping()
         label_list = list(label_mapping.keys())
-        model = HMNeTNERModel(label_list, args)
+        model = I2SRMNERModel(label_list, args)
 
         trainer = Trainer(train_data=train_dataloader, dev_data=dev_dataloader, test_data=test_dataloader, model=model, label_map=label_mapping, args=args, logger=logger, writer=writer)
 
