@@ -958,7 +958,7 @@ class BertModel(BertPreTrainedModel):
         # past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
         # add:
         past_key_values_length = 0  # position_id
-        ## 
+        ##
 
 
         if attention_mask is None:
@@ -1720,7 +1720,7 @@ class BertForTokenClassification(BertPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
-        # add: 
+        # add:
         past_key_values=None,
         prompt_attention_mask=None,
         #
@@ -1740,7 +1740,7 @@ class BertForTokenClassification(BertPreTrainedModel):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            # add: 
+            # add:
             past_key_values=past_key_values,
             #
             output_attentions=output_attentions,
