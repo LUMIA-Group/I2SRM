@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 DATASET_NAME="MRE"
-BERT_NAME="bert-base-uncased"
+BERT_NAME="roberta-large"
 
-CUDA_VISIBLE_DEVICES=2 python -u run.py \
+CUDA_VISIBLE_DEVICES=3 python -u run.py \
         --dataset_name=${DATASET_NAME} \
         --bert_name=${BERT_NAME} \
-        --num_epochs=15 \
+        --num_epochs=25 \
         --batch_size=16 \
         --lr=3e-5 \
         --warmup_ratio=0.06 \
@@ -17,4 +17,4 @@ CUDA_VISIBLE_DEVICES=2 python -u run.py \
         --use_prompt \
         --prompt_len=4 \
         --sample_ratio=1.0 \
-        --save_path='ckpt/re/'
+        --save_path='ckpt/re'
