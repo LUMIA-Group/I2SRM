@@ -2,7 +2,6 @@
 
 DATASET_NAME="MRE"
 BERT_NAME="roberta-large"
-
 CUDA_VISIBLE_DEVICES=3 python -u run.py \
         --dataset_name=${DATASET_NAME} \
         --bert_name=${BERT_NAME} \

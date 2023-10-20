@@ -101,7 +101,7 @@ bash run_twitter17.sh
 To train re model, run this script.
 
 ```shell
-bash run_re_task.sh
+bash run.sh
 ```
 
 Test
