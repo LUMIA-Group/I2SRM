@@ -11,6 +11,7 @@ The approach includes the intra-sample and inter-sample relationship modeling mo
 The intra-sample relationship modeling module can rectify different modality distributions.
 The inter-sample relationship modeling module can enhance representations across samples by AttnMixup Strategy.
 
+
 Please install the following requirements:
 ```
 transformers==4.11.3
@@ -35,7 +36,7 @@ bash run.sh
 4 . Result testing
 ==========
 
-For testing, please delete the "--save_path" line and add load your checkpoint by leveraging "--load_path".
+For testing, please delete the "--save_path" line and add load your checkpoint by leveraging "--load_path" in run.sh.
 
 
 5 . Citation
