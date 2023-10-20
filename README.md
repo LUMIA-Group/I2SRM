@@ -1,6 +1,6 @@
 # I2SRM
 
-Code for ACM Multimedia Asia 2023 paper [I2SRM: Intra- and Inter-Sample Relationship Modeling for Multimodal Information Extraction](https://arxiv.org/abs/2310.06326).
+Codes for ACM Multimedia Asia 2023 paper [I2SRM: Intra- and Inter-Sample Relationship Modeling for Multimodal Information Extraction](https://arxiv.org/abs/2310.06326).
 
 1 . An overview
 ==========
