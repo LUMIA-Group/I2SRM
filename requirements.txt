@@ -1,4 +1,0 @@
-transformers==4.11.3
-wandb==0.12.1
-torchvision==0.8.2
-torch==1.7.1
