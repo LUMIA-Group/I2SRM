@@ -130,6 +130,7 @@ class I2SRMModel(nn.Module):
         entity_hidden_state_bf = entity_hidden_state_bf[:int((0.5 + 0.6*0.5) * entity_hidden_state_bf.size(0)), :]
         labels_bf =labels_bf[:int((0.5 + 0.6*0.5) * entity_hidden_state_bf.size(0))]
 
+        # For NER tasks, please use different classifiers.
         logits = self.classifier(entity_hidden_state_mixup)
         logits_bf = self.classifier(entity_hidden_state_bf)
         if labels is not None:
