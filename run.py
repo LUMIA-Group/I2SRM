@@ -9,9 +9,9 @@ import numpy as np
 import random
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from models.bert_model import I2SRMModel, I2SRMNERModel
+from models.bert_model import I2SRMModel
 from processor.dataset import MMREProcessor, MMPNERProcessor, MMREDataset, MMPNERDataset
-from modules.train import RETrainer, NERTrainer
+from modules.train import RETrainer
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -21,13 +21,6 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-MODEL_CLASSES = {
-    'MRE': I2SRMModel,
-    'twitter15': I2SRMNERModel,
-    'twitter17': I2SRMNERModel
-}
 
 TRAINER_CLASSES = {
     'MRE': RETrainer,
@@ -185,7 +178,7 @@ def main():
     else:   # NER task
         label_mapping = processor.get_label_mapping()
         label_list = list(label_mapping.keys())
-        model = I2SRMNERModel(label_list, args)
+        model = I2SRMModel(label_list, args)
 
         trainer = Trainer(train_data=train_dataloader, dev_data=dev_dataloader, test_data=test_dataloader, model=model, label_map=label_mapping, args=args, logger=logger, writer=writer)
 
