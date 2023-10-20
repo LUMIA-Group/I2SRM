@@ -5,7 +5,7 @@ Code for ACM Multimedia Asia 2023 paper "I2SRM: Intra- and Inter-Sample Relation
 Model Architecture
 ==========
 <div align=center>
-<img src="resource/model.png" width="80%" height="80%" />
+<img src="resource/overview.pdf" width="80%" height="80%" />
 </div>
 The overall architecture of our hierarchical modality fusion network.
 
